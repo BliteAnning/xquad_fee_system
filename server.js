@@ -15,6 +15,7 @@ import paymentRouter from "./routes/paymentRoute.js";
 import refundRouter from "./routes/refundRoute.js";
 import feeAssignRouter from "./routes/feeAssiRoute.js";
 import auditRouter from "./routes/auditRoute.js";
+import job from "./utils/cron.js";
 
 
 
@@ -51,6 +52,7 @@ const corsOptions = {
   optionsSuccessStatus: 200,
 };
 
+job.start()
 // Security headers with helmet
 app.use(
   helmet.contentSecurityPolicy({
