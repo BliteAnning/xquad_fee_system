@@ -2,6 +2,8 @@ import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import validator from "validator";
+import { Parser } from "json2csv";
+import jsPDF from "jspdf";
 import School from "../models/School.js";
 import TransactionLog from "../models/TransactionLog.js";
 import Notification from "../models/Notification.js";
@@ -28,7 +30,9 @@ import {
 import FeeModel from "../models/Fee.js";
 import { logActionUtil } from "./auditController.js";
 import FeeAssignmentModel from "../models/feeAssignmentModel.js";
+import autoTable from "jspdf-autotable";
 import TransactionLogModel from "../models/TransactionLog.js";
+import StudentModel from "../models/Student.js";
 
 export const register = async (req, res) => {
   let session = null;
@@ -1183,7 +1187,7 @@ export const getStudentCount = async (req, res) => {
       entityId: schoolId,
       action: "student_count_viewed",
       actor: schoolId,
-      actorType: "school",
+      actorType: "admin",
       metadata: {
         ip: req.ip,
         deviceInfo: req.headers["user-agent"],
@@ -1200,5 +1204,247 @@ export const getStudentCount = async (req, res) => {
       timestamp: new Date().toISOString(),
     });
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+export const getAuditLogs = async (req, res) => {
+  try {
+    const schoolId = req.user.id;
+    const { page = 1, limit = 10, action, startDate, endDate, fraudScoreMin, fraudScoreMax } = req.query;
+
+    const query = { schoolId: new mongoose.Types.ObjectId(schoolId) };
+    if (action) query.action = action;
+    if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
+      return res.status(400).json({ success: false, message: "Invalid date range" });
+    }
+    if (startDate) query.createdAt = { $gte: new Date(startDate) };
+    if (endDate) query.createdAt = { ...query.createdAt, $lte: new Date(endDate) };
+    if (fraudScoreMin) query["metadata.fraudScore"] = { $gte: parseInt(fraudScoreMin) };
+    if (fraudScoreMax) query["metadata.fraudScore"] = { ...query["metadata.fraudScore"], $lte: parseInt(fraudScoreMax) };
+
+    const logs = await TransactionLogModel.find(query)
+      .populate("paymentId", "amount studentId")
+      .populate("refundId", "amount studentId")
+      .populate("schoolId", "name")
+      .populate("paymentId.studentId refundId.studentId", "name studentId")
+      .sort({ createdAt: -1 }) // Latest first
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+
+    if (logs.length === 0) {
+      return res.status(404).json({ success: false, message: "No logs found" });
+    }
+
+    const totalLogs = await TransactionLogModel.countDocuments(query);
+    const totalPages = Math.ceil(totalLogs / limit);
+
+    await logActionUtil({
+      entityType: "AuditLog",
+      entityId: schoolId,
+      action: "audit_logs_viewed",
+      actor: schoolId,
+      actorType: "admin",
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers["user-agent"],
+        page,
+        limit,
+        filters: { action, startDate, endDate, fraudScoreMin, fraudScoreMax },
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Audit logs retrieved successfully",
+      logs,
+      totalPages,
+      currentPage: parseInt(page),
+    });
+  } catch (error) {
+    console.error("Error retrieving audit logs:", {
+      event: "get_audit_logs_error",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+export const exportAuditLogs = async (req, res) => {
+  try {
+    const schoolId = req.user.id;
+    const { format } = req.params;
+    const { action, startDate, endDate, fraudScoreMin, fraudScoreMax } = req.query;
+
+    const query = { schoolId: new mongoose.Types.ObjectId(schoolId) };
+    if (action) query.action = action;
+    if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
+      return res.status(400).json({ success: false, message: "Invalid date range" });
+    }
+    if (startDate) query.createdAt = { $gte: new Date(startDate) };
+    if (endDate) query.createdAt = { ...query.createdAt, $lte: new Date(endDate) };
+    if (fraudScoreMin) query["metadata.fraudScore"] = { $gte: parseInt(fraudScoreMin) };
+    if (fraudScoreMax) query["metadata.fraudScore"] = { ...query["metadata.fraudScore"], $lte: parseInt(fraudScoreMax) };
+
+    const logs = await TransactionLogModel.find(query)
+      .populate("paymentId", "amount studentId")
+      .populate("refundId", "amount studentId")
+      .populate("schoolId", "name")
+      .populate("paymentId.studentId refundId.studentId", "name studentId")
+      .sort({ createdAt: -1 });
+
+    if (logs.length === 0) {
+      return res.status(404).json({ success: false, message: "No logs found" });
+    }
+
+    if (format === "csv") {
+      const fields = [
+        { label: "Action", value: "action" },
+        { label: "Timestamp", value: "createdAt" },
+        {
+          label: "Entity",
+          value: (row) =>
+            row.paymentId
+              ? `${row.paymentId.studentId?.name || "Unknown"} (ID: ${
+                  row.paymentId.studentId?.studentId || "N/A"
+                }) - Payment ($${row.paymentId.amount})`
+              : row.refundId
+              ? `${row.refundId.studentId?.name || "Unknown"} (ID: ${
+                  row.refundId.studentId?.studentId || "N/A"
+                }) - Refund ($${row.refundId.amount})`
+              : row.schoolId
+              ? `${row.schoolId.name} (Admin)`
+              : "System",
+        },
+        { label: "Fraud Score", value: "metadata.fraudScore" },
+        { label: "IP", value: "metadata.ip" },
+        { label: "Device Info", value: "metadata.deviceInfo" },
+        { label: "Device ID", value: "metadata.deviceId" },
+      ];
+      const json2csv = new Parser({ fields });
+      const csv = json2csv.parse(logs);
+      res.header("Content-Type", "text/csv");
+      res.attachment(`audit_logs_${new Date().toISOString()}.csv`);
+      return res.send(csv);
+    } else if (format === "pdf") {
+      const doc = new jsPDF();
+      doc.text("Audit Logs", 20, 20);
+      autoTable(doc, {
+        head: [["Action", "Timestamp", "Entity", "Fraud Score", "IP", "Device Info", "Device ID"]],
+        body: logs.map((log) => [
+          log.action,
+          new Date(log.createdAt).toISOString(),
+          log.paymentId
+            ? `${log.paymentId.studentId?.name || "Unknown"} (ID: ${
+                log.paymentId.studentId?.studentId || "N/A"
+              }) - Payment ($${log.paymentId.amount})`
+            : log.refundId
+            ? `${log.refundId.studentId?.name || "Unknown"} (ID: ${
+                log.refundId.studentId?.studentId || "N/A"
+              }) - Refund ($${log.refundId.amount})`
+            : log.schoolId
+            ? `${log.schoolId.name} (Admin)`
+            : "System",
+          log.metadata.fraudScore || "N/A",
+          log.metadata.ip || "N/A",
+          log.metadata.deviceInfo || "N/A",
+          log.metadata.deviceId || "N/A",
+        ]),
+        startY: 30,
+      });
+      res.header("Content-Type", "application/pdf");
+      res.attachment(`audit_logs_${new Date().toISOString()}.pdf`);
+      return res.send(doc.output());
+    } else {
+      return res.status(400).json({ success: false, message: "Invalid export format" });
+    }
+  } catch (error) {
+    console.error("Error exporting audit logs:", {
+      event: "export_audit_logs_error",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+export const deleteAuditLog = async (req, res) => {
+  try {
+    const schoolId = req.user.id;
+    const { id } = req.params;
+
+    const log = await TransactionLogModel.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      schoolId: new mongoose.Types.ObjectId(schoolId),
+    });
+
+    if (!log) {
+      return res.status(404).json({ success: false, message: "Log not found" });
+    }
+
+    await TransactionLogModel.deleteOne({ _id: id });
+
+    await logActionUtil({
+      entityType: "AuditLog",
+      entityId: id,
+      action: "audit_log_deleted",
+      actor: schoolId,
+      actorType: "admin",
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers["user-agent"],
+        deletedLogId: id,
+      },
+    });
+
+    res.status(200).json({ success: true, message: "Log deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting audit log:", {
+      event: "delete_audit_log_error",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ success: false, message: "Failed to delete log", error: error.message });
+  }
+};
+
+export const clearAllAuditLogs = async (req, res) => {
+  try {
+    const schoolId = req.user.id;
+    const { schoolId: querySchoolId } = req.query;
+
+    if (schoolId !== querySchoolId) {
+      return res.status(403).json({ success: false, message: "Unauthorized to clear logs for this school" });
+    }
+
+    const deleteResult = await TransactionLogModel.deleteMany({
+      schoolId: new mongoose.Types.ObjectId(schoolId),
+    });
+
+    if (deleteResult.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: "No logs found to clear" });
+    }
+
+    await logActionUtil({
+      entityType: "AuditLog",
+      entityId: schoolId,
+      action: "audit_logs_cleared",
+      actor: schoolId,
+      actorType: "admin",
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers["user-agent"],
+        deletedCount: deleteResult.deletedCount,
+      },
+    });
+
+    res.status(200).json({ success: true, message: "All logs cleared" });
+  } catch (error) {
+    console.error("Error clearing audit logs:", {
+      event: "clear_audit_logs_error",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ success: false, message: "Failed to clear logs", error: error.message });
   }
 };

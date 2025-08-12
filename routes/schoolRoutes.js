@@ -1,6 +1,6 @@
-// routes/schoolRoutes.js
 import express from 'express';
-import { register, login, addStudent, getAdminDashboard, checkAuth, sendOtp, resendOtp, verifyOtp, getStudentCount, deleteFee, getFees } from '../controller/schoolController.js';
+import { register, login, addStudent, getAdminDashboard, checkAuth, sendOtp, resendOtp, verifyOtp, getStudentCount, deleteFee, getFees, exportAuditLogs, getAuditLogs,deleteAuditLog,
+  clearAllAuditLogs, } from '../controller/schoolController.js';
 import arcjetMiddleware from '../middleware/arcjet.js';
 import { authenticateSchool } from '../middleware/auth.js';
 
@@ -17,5 +17,9 @@ schoolRouter.get('/dashboard', arcjetMiddleware, authenticateSchool, getAdminDas
 schoolRouter.get('/fees', arcjetMiddleware, authenticateSchool, getFees);
 schoolRouter.delete('/fees/:id', arcjetMiddleware, authenticateSchool, deleteFee)
 schoolRouter.post('/students/count', arcjetMiddleware, authenticateSchool, getStudentCount);
+schoolRouter.get("/audits", authenticateSchool, getAuditLogs);
+schoolRouter.get("/audits/export/:format", authenticateSchool, exportAuditLogs);
+schoolRouter.delete("/audits/:id", arcjetMiddleware, authenticateSchool, deleteAuditLog);
+schoolRouter.delete("/audits", arcjetMiddleware, authenticateSchool, clearAllAuditLogs);
 
 export default schoolRouter;

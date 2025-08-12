@@ -5,7 +5,7 @@ const auditLogSchema = new mongoose.Schema(
     entityType: {
       type: String,
       required: true,
-      enum: ['Payment', 'Refund', 'Invoice', 'Fee', 'Student', 'School',"FeeAssignment"],
+      // enum: ['Payment', 'Refund', 'Invoice', 'Fee', 'Student', 'School',"FeeAssignment"],
     },
     entityId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -15,25 +15,25 @@ const auditLogSchema = new mongoose.Schema(
     action: {
       type: String,
       required: true,
-      enum: [
-        'payment_initiated',
-        'payment_confirmed',
-        'payment_rejected',
-        'payment_expired',
-        'invoice_generated',
-        'refund_requested',
-        'refund_approved',
-        'refund_rejected',
-        'refund_processed',
-        'student_created',
-        'school_updated',
-        'fee_assigned',
-        'fee_created',
-        'fee_updated',
-        'dashboard_accessed',
-        'fees_viewed',
-        'fee_deleted'
-      ],
+      // enum: [
+      //   'payment_initiated',
+      //   'payment_confirmed',
+      //   'payment_rejected',
+      //   'payment_expired',
+      //   'invoice_generated',
+      //   'refund_requested',
+      //   'refund_approved',
+      //   'refund_rejected',
+      //   'refund_processed',
+      //   'student_created',
+      //   'school_updated',
+      //   'fee_assigned',
+      //   'fee_created',
+      //   'fee_updated',
+      //   'dashboard_accessed',
+      //   'fees_viewed',
+      //   'fee_deleted'
+      // ],
     },
     actorType: {
       type: String,
