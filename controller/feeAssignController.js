@@ -8,6 +8,7 @@ import TransactionLogModel from '../models/TransactionLog.js';
 import { logActionUtil } from './auditController.js';
 import { sendFeeAssignmentEmail } from '../utils/email.js';
 import AuditLogModel from '../models/AuditTrail.js';
+import PaymentModel from '../models/Payment.js';
 
 // Create Fee (admin-only)
 export const createFee = async (req, res) => {
@@ -477,8 +478,8 @@ export const updateFeeAssignmentStatus = async ({ paymentId }) => {
       entityType: 'FeeAssignment',
       entityId: assignment._id,
       action: 'fee_assignment_updated',
-      actor: null,
-      actorType: 'system',
+      actor: payment.schoolId,
+      actorType: 'School',
       metadata: {
         studentId: payment.studentId,
         feeId: payment.feeId,

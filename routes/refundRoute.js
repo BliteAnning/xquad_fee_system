@@ -5,7 +5,7 @@ import arcjetStudentMiddleware from '../middleware/arcjetStudent.js';
 
 const refundRouter = express.Router();
 
-refundRouter.post('/request', arcjetStudentMiddleware,authenticateStudent, requestRefund);
+refundRouter.post('/request',authenticateStudent, requestRefund);
 refundRouter.post('/review', arcjetStudentMiddleware,authenticateSchool, reviewRefund);
 refundRouter.post('/webhook', arcjetStudentMiddleware,handleRefundWebhook);
 

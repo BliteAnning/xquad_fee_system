@@ -7,7 +7,7 @@ import arcjetStudentMiddleware from '../middleware/arcjetStudent.js';
 const paymentRouter = express.Router();
 
 paymentRouter.post('/initialize', arcjetStudentMiddleware,authenticateStudent, initializePayment);
-paymentRouter.post('/verify', arcjetStudentMiddleware, authenticateSchool, verifyPayment); // Optional: protect with auth if needed
+paymentRouter.get('/verify', arcjetStudentMiddleware, authenticateSchool, verifyPayment); // Optional: protect with auth if needed
 paymentRouter.post('/webhook', arcjetStudentMiddleware,handleWebhook);
 paymentRouter.post('/invoice/generate', arcjetStudentMiddleware, authenticateSchool, createInvoice); // Endpoint to generate invoice
 
