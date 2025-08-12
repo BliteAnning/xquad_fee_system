@@ -1,4 +1,3 @@
-// models/Student.js
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
@@ -54,6 +53,9 @@ studentSchema.pre('save', async function (next) {
 // Composite index for school-specific studentId uniqueness
 studentSchema.index({ schoolId: 1, studentId: 1 }, { unique: true });
 studentSchema.index({ email: 1 });
+// CHANGE: Added indexes for department and yearOfStudy to optimize filtering
+studentSchema.index({ department: 1 });
+studentSchema.index({ yearOfStudy: 1 });
 
 const StudentModel = mongoose.models.Student || mongoose.model('Student', studentSchema);
 

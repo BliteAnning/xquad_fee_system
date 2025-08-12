@@ -1448,3 +1448,130 @@ export const clearAllAuditLogs = async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to clear logs", error: error.message });
   }
 };
+
+export const getStudents = async (req, res) => {
+  try {
+    const schoolId = req.user.id;
+    const {
+      name,
+      email,
+      studentId,
+      department,
+      yearOfStudy,
+      courses,
+      page = 1,
+      limit = 10,
+      sortBy = 'name',
+      order = 'asc',
+    } = req.query;
+
+    // Validate query parameters
+    const validDepartments = ['Computer Science', 'Engineering', 'Business', 'Arts', 'Sciences', 'Medicine'];
+    const validYears = ['Freshman', 'Sophomore', 'Junior', 'Senior'];
+    const validCourses = ['CS101', 'ENG201', 'BUS301', 'ART101', 'SCI201', 'MED101'];
+    const validSortFields = ['name', 'yearOfStudy'];
+
+    if (department && !validDepartments.includes(department)) {
+      return res.status(400).json({ message: 'Invalid department' });
+    }
+    if (yearOfStudy && !validYears.includes(yearOfStudy)) {
+      return res.status(400).json({ message: 'Invalid year of study' });
+    }
+    if (courses && !Array.isArray(courses) && !validCourses.includes(courses)) {
+      return res.status(400).json({ message: 'Invalid course' });
+    }
+    if (sortBy && !validSortFields.includes(sortBy)) {
+      return res.status(400).json({ message: 'Invalid sort field' });
+    }
+    if (order && !['asc', 'desc'].includes(order)) {
+      return res.status(400).json({ message: 'Invalid sort order' });
+    }
+
+    // Build query
+    const query = { schoolId: new mongoose.Types.ObjectId(schoolId) };
+    if (name) query.name = { $regex: name, $options: 'i' };
+    if (email) query.email = { $regex: email, $options: 'i' };
+    if (studentId) query.studentId = { $regex: studentId, $options: 'i' };
+    if (department) query.department = department;
+    if (yearOfStudy) query.yearOfStudy = yearOfStudy;
+    if (courses) query.courses = { $all: Array.isArray(courses) ? courses : [courses] };
+
+    // Pagination and sorting
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const skip = (pageNum - 1) * limitNum;
+    const sort = { [sortBy]: order === 'asc' ? 1 : -1 };
+
+    // Fetch students
+    const students = await StudentModel.find(query)
+      .select('name email studentId department yearOfStudy courses')
+      .sort(sort)
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const total = await StudentModel.countDocuments(query);
+
+    // Fraud detection: Log if more than 100 students retrieved
+    if (total > 100) {
+      try {
+        await TransactionLogModel.create({
+          schoolId,
+          action: 'large_student_retrieval',
+          metadata: {
+            ip: req.ip,
+            deviceInfo: req.headers['user-agent'],
+            studentCount: total,
+            filters: { name, email, studentId, department, yearOfStudy, courses },
+          },
+        });
+      } catch (error) {
+        console.log({
+          event: `transaction_log_error`,
+          error: error
+        })
+      }
+    }
+
+    // Log action
+    try {
+      await logActionUtil({
+        entityType: 'Student',
+        entityId: schoolId,
+        action: 'students_viewed',
+        actor: schoolId,
+        actorType: 'admin',
+        metadata: {
+          ip: req.ip,
+          deviceInfo: req.headers['user-agent'],
+          filters: { name, email, studentId, department, yearOfStudy, courses },
+          studentCount: students.length,
+        },
+      });
+    } catch (error) {
+       console.log({
+          event: `log_action_util_error`,
+          error: error
+        })
+    }
+
+    // Handle no students case
+    if (students.length === 0) {
+      return res.status(404).json({ message: 'No students found for this school' });
+    }
+
+    res.status(200).json({
+      students,
+      total,
+      page: pageNum,
+      limit: limitNum,
+    });
+  } catch (error) {
+    console.error('Error retrieving students:', {
+      event: 'get_students_error',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
