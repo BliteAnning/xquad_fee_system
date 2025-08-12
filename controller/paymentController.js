@@ -143,7 +143,10 @@ export const initializePayment = async (req, res) => {
 export const verifyPayment = async (req, res) => {
   try {
     const { reference } = req.query;
-    const payment = await PaymentModel.findOne({ 'providerMetadata.paystackRef': reference });
+    const payment = await PaymentModel.findOne({ 'providerMetadata.paystackRef': reference })
+      .populate('studentId')
+      .populate('schoolId')
+      .populate('feeId');;
     if (!payment) {
       return res.status(404).json({ message: 'Payment not found' });
     }
@@ -152,12 +155,12 @@ export const verifyPayment = async (req, res) => {
     
 
     const response = await axios.get(`https://${PAYSTACK_BASE_URL}/transaction/verify/${reference}`, {
-      headers: { Authorization: `Bearer`+ process.env.PAYSTACK_SECRET_KEY },
+      headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` },
     });
 
     if (response.data.status && response.data.data.status === 'success') {
       payment.status = 'confirmed';
-      payment.providerMetadata.set('paystackData', response.data.data);
+      payment.providerMetadata.set('paystackData', response.data.data); // Store full Paystack response
       await payment.save();
 
       // Log to TransactionLog

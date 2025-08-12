@@ -22,9 +22,9 @@ export const requestRefund = async (req, res) => {
     if (payment.studentId.toString() !== studentId.toString()) {
       return res.status(403).json({ message: 'Unauthorized: Payment does not belong to this student' });
     }
-    if (payment.status !== 'confirmed') {
+    /*if (payment.status !== 'confirmed') {
       return res.status(400).json({ message: 'Payment must be confirmed to request a refund' });
-    }
+    }*/
 
     // Calculate refundable amount
     const existingRefunds = await RefundModel.find({
@@ -53,7 +53,7 @@ export const requestRefund = async (req, res) => {
         {
           action: 'refund_requested',
           timestamp: new Date(),
-          metadata: { ip: req.ip, deviceInfo: req.headers['user-agent'] },
+          metadata: { ip: req.ip, deviceInfo: req.headers['user-agent'], studentId },
         },
       ],
     });
@@ -79,12 +79,13 @@ export const requestRefund = async (req, res) => {
       entityType: 'Refund',
       entityId: refund._id,
       action: 'refund_requested',
-      actor: null,
-      actorType: 'system',
+      actor: studentId,
+      actorType: 'student',
       metadata: {
         ip: req.ip,
         deviceInfo: req.headers['user-agent'],
         studentId,
+        studentEmail: req.user.email,
         amount,
       },
     });
@@ -107,12 +108,12 @@ export const reviewRefund = async (req, res) => {
     if (!refund) {
       return res.status(404).json({ message: 'Refund not found' });
     }
-    if (refund.schoolId._id.toString() !== adminId) {
+    if (refund.schoolId._id.toString() !== adminId.toString()) {
       return res.status(403).json({ message: 'Unauthorized: Refund does not belong to this school' });
     }
-    if (refund.status !== 'requested') {
+    /*if (refund.status !== 'requested') {
       return res.status(400).json({ message: 'Refund is not in requested status' });
-    }
+    }*/
     if (!['approved', 'rejected'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status. Must be approved or rejected' });
     }
@@ -158,6 +159,18 @@ export const reviewRefund = async (req, res) => {
     // If approved, initiate Paystack refund
     if (status === 'approved') {
       const payment = await PaymentModel.findById(refund.paymentId);
+      if (!payment) {
+        return res.status(404).json({ message: 'Associated payment not found' });
+      }
+      if (payment.paymentProvider !== 'Paystack') {
+        return res.status(400).json({ message: `Unsupported payment provider: ${payment.paymentProvider}` });
+      }
+      // Handle both Map and plain object for providerMetadata
+      const paystackRef = payment.providerMetadata.get("paystackRef");
+      if (!paystackRef) {
+        return res.status(400).json({ message: 'Paystack reference not found in payment' });
+      }
+
       const paystackProvider = refund.schoolId.paymentProviders.find(p => p.provider === 'Paystack');
       if (!paystackProvider) {
         return res.status(400).json({ message: 'Paystack not configured for this school' });
@@ -175,7 +188,7 @@ export const reviewRefund = async (req, res) => {
         path: '/refund',
         method: 'POST',
         headers: {
-          Authorization: `Bearer` + process.env.PAYSTACK_SECRET_KEY,
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, // Fixed space after Bearer
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(params),
         },
@@ -184,19 +197,13 @@ export const reviewRefund = async (req, res) => {
       const paystackResponse = await new Promise((resolve, reject) => {
         const req = https.request(options, (response) => {
           let data = '';
-
           response.on('data', (chunk) => {
             data += chunk;
           });
-
           response.on('end', () => {
             try {
               const result = JSON.parse(data);
-              if (result.status) {
-                resolve(result);
-              } else {
-                reject(new Error(result.message || 'Paystack refund initiation failed'));
-              }
+              resolve(result);
             } catch (error) {
               reject(error);
             }
@@ -209,12 +216,12 @@ export const reviewRefund = async (req, res) => {
       });
 
       // Update refund status to processed if Paystack accepts it
-      if (paystackResponse.data.status === 'success') {
+      if (paystackResponse.status && paystackResponse.data.status === 'success') {
         refund.status = 'processed';
         refund.auditTrail.push({
           action: 'refund_processed',
           timestamp: new Date(),
-          metadata: { ip: req.ip, deviceInfo: req.headers['user-agent'], adminId, paystackRef: paystackResponse.data.data.transaction.reference },
+          metadata: { ip: req.ip, deviceInfo: req.headers['user-agent'], adminId, paystackRef: payment.providerMetadata.get('paystackRef') },
         });
         await refund.save();
 
@@ -229,7 +236,7 @@ export const reviewRefund = async (req, res) => {
             deviceInfo: req.headers['user-agent'],
             adminId,
             amount: refund.amount,
-            paystackRef: paystackResponse.data.data.transaction.reference,
+            paystackRef: payment.providerMetadata.get('paystackRef'),
           },
         });
 
@@ -245,9 +252,14 @@ export const reviewRefund = async (req, res) => {
             deviceInfo: req.headers['user-agent'],
             adminId,
             amount: refund.amount,
-            paystackRef: paystackResponse.data.data.transaction.reference,
+            paystackRef: payment.providerMetadata.get('paystackRef'),
           },
         });
+      } else {
+        // Roll back status to approved if Paystack fails
+        refund.status = 'approved';
+        await refund.save();
+        return res.status(400).json({ message: 'Paystack refund initiation failed', error: paystackResponse.message });
       }
     }
 
@@ -263,7 +275,7 @@ export const handleRefundWebhook = async (req, res) => {
   try {
     const event = req.body;
     const signature = req.headers['x-paystack-signature'];
-    const paystackSecret = process.env.PAYSTACK_SECRET_KEY; // Or fetch from school.paymentProviders
+    const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
 
     // Verify Paystack webhook signature
     const hash = crypto
@@ -276,8 +288,15 @@ export const handleRefundWebhook = async (req, res) => {
 
     if (event.event === 'refund.processed') {
       const reference = event.data.transaction.reference;
-      const refundId = event.data.refunded_by; // Assuming Paystack includes refundId or metadata
-      const refund = await RefundModel.findOne({ _id: refundId }).populate('schoolId');
+      // Find refund by payment's paystackRef (since Paystack doesn't provide refundId)
+      const payment = await PaymentModel.findOne({ 'providerMetadata.paystackRef': reference });
+      if (!payment) {
+        return res.status(404).json({ message: 'Payment not found' });
+      }
+      const refund = await RefundModel.findOne({
+        paymentId: payment._id,
+        status: { $in: ['approved', 'requested'] },
+      }).populate('schoolId');
       if (!refund) {
         return res.status(404).json({ message: 'Refund not found' });
       }
@@ -300,6 +319,7 @@ export const handleRefundWebhook = async (req, res) => {
           metadata: {
             paystackRef: reference,
             webhook: true,
+            studentId: refund.studentId,
           },
         });
 
@@ -313,6 +333,8 @@ export const handleRefundWebhook = async (req, res) => {
           metadata: {
             paystackRef: reference,
             webhook: true,
+            studentId: refund.studentId,
+            studentEmail: event.data.customer.email || '',
           },
         });
       }
@@ -320,8 +342,14 @@ export const handleRefundWebhook = async (req, res) => {
       res.status(200).json({ message: 'Refund webhook processed successfully' });
     } else if (event.event === 'refund.failed') {
       const reference = event.data.transaction.reference;
-      const refundId = event.data.refunded_by; // Assuming Paystack includes refundId or metadata
-      const refund = await RefundModel.findOne({ _id: refundId });
+      const payment = await PaymentModel.findOne({ 'providerMetadata.paystackRef': reference });
+      if (!payment) {
+        return res.status(404).json({ message: 'Payment not found' });
+      }
+      const refund = await RefundModel.findOne({
+        paymentId: payment._id,
+        status: { $in: ['approved', 'requested'] },
+      });
       if (!refund) {
         return res.status(404).json({ message: 'Refund not found' });
       }
@@ -343,6 +371,7 @@ export const handleRefundWebhook = async (req, res) => {
         metadata: {
           paystackRef: reference,
           webhook: true,
+          studentId: refund.studentId,
         },
       });
 
@@ -356,6 +385,8 @@ export const handleRefundWebhook = async (req, res) => {
         metadata: {
           paystackRef: reference,
           webhook: true,
+          studentId: refund.studentId,
+          studentEmail: event.data.customer.email || '',
         },
       });
 
