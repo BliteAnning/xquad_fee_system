@@ -7,6 +7,7 @@ import { logActionUtil } from './auditController.js';
 import { createInvoice } from './invoiceController.js';
 import { updateFeeAssignmentStatus } from './feeAssignController.js';
 import axios from 'axios';
+import FeeAssignmentModel from '../models/feeAssignmentModel.js';
 
 const PAYSTACK_BASE_URL = 'api.paystack.co';
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
@@ -98,6 +99,22 @@ export const initializePayment = async (req, res) => {
 
     payment.providerMetadata.set('paystackRef', paystackRequest.data.reference);
     await payment.save();
+
+    const assignment = await FeeAssignmentModel.findOne({
+      feeId: payment.feeId,
+      studentId: payment.studentId,
+    })
+
+     if (!assignment) {
+          return res.status(404).json({
+            successs: false,
+            message : "Fee assignment not found"
+          })
+        }
+
+        assignment.amountPaid += payment.amount;
+    assignment.status = assignment.amountPaid >= assignment.amountDue ? 'fully_paid' : 'partially_paid';
+    await assignment.save();
 
     // Log to TransactionLog
     await TransactionLogModel.create({
