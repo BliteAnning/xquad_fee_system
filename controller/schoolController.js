@@ -1575,3 +1575,170 @@ export const getStudents = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
+
+export const getFeeAssignments = async (req, res) => {
+  try {
+    const schoolId = req.user.id;
+    const { feeType, studentId, department, yearOfStudy, status, page = 1, limit = 10, sortBy = 'dueDate', order = 'asc' } = req.query;
+
+    const query = { schoolId };
+    if (feeType) query['feeId.feeType'] = { $regex: feeType, $options: 'i' };
+    if (studentId) query.studentId = studentId;
+    if (department) query['groupCriteria.department'] = department;
+    if (yearOfStudy) query['groupCriteria.yearOfStudy'] = yearOfStudy;
+    if (status) query.status = status;
+
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const skip = (pageNum - 1) * limitNum;
+    const sortOrder = order === 'asc' ? 1 : -1;
+
+    // Update overdue status dynamically
+    try {
+      await FeeAssignmentModel.updateMany(
+        {
+          schoolId,
+          status: { $in: ['assigned', 'partially_paid'] },
+          'feeId.dueDate': { $lt: new Date() },
+          $expr: { $lt: ['$amountPaid', '$amountDue'] },
+        },
+        { $set: { status: 'overdue' } }
+      );
+    } catch (error) {
+      console.error('Error updating overdue status:', {
+        event: 'update_overdue_status_error',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const feeAssignments = await FeeAssignmentModel.find(query)
+      .populate({
+        path: 'feeId',
+        select: 'feeType amount dueDate academicSession',
+      })
+      .populate({
+        path: 'studentId',
+        select: 'name email studentId',
+      })
+      .sort({ [sortBy]: sortOrder })
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const total = await FeeAssignmentModel.countDocuments(query);
+
+    if (feeAssignments.length > 100) {
+      await logActionUtil({
+        entityType: 'FeeAssignment',
+        entityId: schoolId,
+        action: 'large_fee_assignment_query',
+        actor: schoolId,
+        actorType: 'admin',
+        metadata: {
+          ip: req.ip,
+          deviceInfo: req.headers['user-agent'],
+          query: req.query,
+          count: feeAssignments.length,
+        },
+      });
+    }
+
+    await logActionUtil({
+      entityType: 'FeeAssignment',
+      entityId: schoolId,
+      action: 'fee_assignments_viewed',
+      actor: schoolId,
+      actorType: 'admin',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        filters: req.query,
+        count: feeAssignments.length,
+      },
+    });
+
+    res.status(200).json({
+      feeAssignments,
+      total,
+      page: pageNum,
+      limit: limitNum,
+    });
+  } catch (error) {
+    console.error('Error retrieving fee assignments:', {
+      event: 'get_fee_assignments_error',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const sendFeeAssignmentReminders = async (req, res) => {
+  try {
+    const schoolId = req.user.id;
+    const { feeAssignmentIds } = req.body;
+
+    const query = {
+      schoolId,
+      status: { $in: ['overdue', 'partially_paid'] },
+    };
+    if (feeAssignmentIds && Array.isArray(feeAssignmentIds)) {
+      query._id = { $in: feeAssignmentIds };
+    }
+
+    const feeAssignments = await FeeAssignmentModel.find(query)
+      .populate({
+        path: 'feeId',
+        select: 'feeType amount dueDate academicSession',
+      })
+      .populate({
+        path: 'studentId',
+        select: 'name email',
+      });
+
+    if (feeAssignments.length === 0) {
+      return res.status(404).json({ message: 'No eligible fee assignments found for reminders' });
+    }
+
+    const sendPromises = feeAssignments.map(async (assignment) => {
+      if (assignment.studentId) {
+        try {
+          await sendFeeAssignmentEmail(assignment.studentId, assignment.feeId, assignment.feeId.dueDate);
+          await logActionUtil({
+            entityType: 'FeeAssignment',
+            entityId: assignment._id,
+            action: 'reminder_sent',
+            actor: schoolId,
+            actorType: 'admin',
+            metadata: {
+              ip: req.ip,
+              deviceInfo: req.headers['user-agent'],
+              feeType: assignment.feeId.feeType,
+              studentId: assignment.studentId._id,
+            },
+          });
+        } catch (error) {
+          console.error({
+            event: 'send_reminder_error',
+            error: error.message,
+            timestamp: new Date().toISOString(),
+            feeAssignmentId: assignment._id,
+          });
+        }
+      }
+    });
+
+    await Promise.all(sendPromises);
+
+    res.status(200).json({ message: 'Reminders sent successfully' });
+  } catch (error) {
+    console.error('Error sending fee assignment reminders:', {
+      event: 'send_reminders_error',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+

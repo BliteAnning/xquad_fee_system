@@ -5,10 +5,10 @@ import validator from "validator";
 import Student from "../models/Student.js";
 import TransactionLog from "../models/TransactionLog.js";
 import Notification from "../models/Notification.js";
-import School from "../models/School.js"
-import Payment from "../models/Payment.js"
-import Receipt from "../models/Receipt.js"
-import Fee from "../models/Fee.js"
+import School from "../models/School.js";
+import Payment from "../models/Payment.js";
+import Receipt from "../models/Receipt.js";
+import Fee from "../models/Fee.js";
 import StudentRefreshToken from "../models/StudentRefreshToken.js";
 import {
   sendStudentLoginSuccessEmail,
@@ -20,6 +20,7 @@ import {
   JWT_EXPIRES_IN,
   MAX_LOGIN_ATTEMPTS,
 } from "../config/env.js";
+import FeeAssignmentModel from "../models/feeAssignmentModel.js";
 
 export const login = async (req, res) => {
   let session = null;
@@ -55,13 +56,23 @@ export const login = async (req, res) => {
       createdAt: { $gte: oneHourAgo },
     }).session(session);
     if (failedAttempts >= MAX_LOGIN_ATTEMPTS) {
-      throw new Error("Too many failed login attempts. Please try again later.");
+      throw new Error(
+        "Too many failed login attempts. Please try again later."
+      );
     }
 
     // Find student
     const student = await Student.findOne({ email }).session(session);
     if (!student) {
-      await logFailedLogin(email, req.ip, req.headers["user-agent"], null, null, failedAttempts + 1, session);
+      await logFailedLogin(
+        email,
+        req.ip,
+        req.headers["user-agent"],
+        null,
+        null,
+        failedAttempts + 1,
+        session
+      );
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
@@ -71,7 +82,7 @@ export const login = async (req, res) => {
     // Verify password
     const isMatch = await bcrypt.compare(password, student.password);
     if (!isMatch) {
-        console.log("70")
+      console.log("70");
       await logFailedLogin(
         email,
         req.ip,
@@ -81,7 +92,7 @@ export const login = async (req, res) => {
         failedAttempts + 1,
         session
       );
-        console.log("80")
+      console.log("80");
       try {
         console.log("Sending login failure notification...");
         await sendFailedLoginEmail(student, req.ip, new Date());
@@ -233,10 +244,18 @@ export const login = async (req, res) => {
   }
 };
 
-const logFailedLogin = async (email, ip, deviceId, studentId, schoolId, failedAttempts, session) => {
-    console.log("230")
-    try {
-      console.log("231", { email, studentId, schoolId, failedAttempts });
+const logFailedLogin = async (
+  email,
+  ip,
+  deviceId,
+  studentId,
+  schoolId,
+  failedAttempts,
+  session
+) => {
+  console.log("230");
+  try {
+    console.log("231", { email, studentId, schoolId, failedAttempts });
     const fraudScore = Math.min(failedAttempts * 20, 100); // Simple rule: 20 points per failed attempt
     const transactionLog = new TransactionLog({
       studentId,
@@ -380,7 +399,10 @@ export const getDashboard = async (req, res) => {
     }
 
     // Handle empty payments/receipts
-    if (responseData.payments.length === 0 && responseData.receipts.length === 0) {
+    if (
+      responseData.payments.length === 0 &&
+      responseData.receipts.length === 0
+    ) {
       responseData.message = "No payments or receipts found for this student.";
     }
 
@@ -405,3 +427,168 @@ export const getDashboard = async (req, res) => {
     });
   }
 };
+
+export const getStudentDashboard = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const schoolId = req.user.schoolId;
+    const { data } = req.query;
+
+    const responseData = { student: {}, payments: [], receipts: [] };
+
+    if (!data || data === "student") {
+      const student = await Student.findById(studentId).select(
+        "_id name email studentId department yearOfStudy courses"
+      );
+      if (!student) {
+        throw new Error("Student not found", { cause: { statusCode: 404 } });
+      }
+      responseData.student = {
+        _id: student._id,
+        name: student.name,
+        email: student.email,
+        studentId: student.studentId,
+        department: student.department,
+        yearOfStudy: student.yearOfStudy,
+        courses: student.courses,
+      };
+    }
+
+    if (!data || data === "payments") {
+      const payments = await Payment.find({ studentId, schoolId })
+        .populate({
+          path: "feeId",
+          select: "feeType academicSession dueDate",
+        })
+        .select("_id amount feeId paymentProvider status receiptUrl createdAt");
+      responseData.payments = payments.map((payment) => ({
+        _id: payment._id,
+        amount: payment.amount,
+        feeId: payment.feeId._id,
+        feeDetails: {
+          feeType: payment.feeId.feeType,
+          academicSession: payment.feeId.academicSession,
+          dueDate: payment.feeId.dueDate,
+        },
+        paymentProvider: payment.paymentProvider,
+        status: payment.status,
+        receiptUrl: payment.receiptUrl,
+        createdAt: payment.createdAt,
+      }));
+    }
+
+    if (!data || data === "receipts") {
+      const receipts = await Receipt.find({ studentId, schoolId }).select(
+        "_id receiptNumber amount date pdfUrl branding"
+      );
+      responseData.receipts = receipts.map((receipt) => ({
+        _id: receipt._id,
+        receiptNumber: receipt.receiptNumber,
+        amount: receipt.amount,
+        date: receipt.date,
+        pdfUrl: receipt.pdfUrl,
+        branding: receipt.branding,
+      }));
+    }
+
+    if (
+      responseData.payments.length === 0 &&
+      responseData.receipts.length === 0
+    ) {
+      responseData.message = "No payments or receipts found for this student.";
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: responseData,
+    });
+  } catch (error) {
+    console.error("Student dashboard error:", {
+      event: "student_dashboard_error",
+      studentId: req.user?.id,
+      email: req.user?.email,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+};
+
+export const getStudentFeeAssignments = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const schoolId = req.user.schoolId;
+    const { feeType, status } = req.query;
+
+    const query = { studentId, schoolId };
+    if (feeType) query['feeId.feeType'] = { $regex: feeType, $options: 'i' };
+    if (status) query.status = status;
+
+    try {
+      await FeeAssignmentModel.updateMany(
+        {
+          studentId,
+          schoolId,
+          status: { $in: ['assigned', 'partially_paid'] },
+          'feeId.dueDate': { $lt: new Date() },
+          $expr: { $lt: ['$amountPaid', '$amountDue'] },
+        },
+        { $set: { status: 'overdue' } }
+      );
+    } catch (error) {
+      console.error('Error updating overdue status:', {
+        event: 'update_overdue_status_error',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const feeAssignments = await FeeAssignmentModel.find(query)
+      .populate({
+        path: 'feeId',
+        select: 'feeType amount dueDate academicSession',
+      })
+      .lean();
+
+    try {
+      await logActionUtil({
+        entityType: 'FeeAssignment',
+        entityId: studentId,
+        action: 'fee_assignments_viewed',
+        actor: studentId,
+        actorType: 'student',
+        metadata: {
+          ip: req.ip,
+          deviceInfo: req.headers['user-agent'],
+          filters: { feeType, status },
+          feeAssignmentCount: feeAssignments.length,
+        },
+      });
+    } catch (error) {
+      console.error({
+        event: 'log_action_util_error',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    if (feeAssignments.length === 0) {
+      return res.status(404).json({ message: 'No fee assignments found for this student' });
+    }
+
+    res.status(200).json({
+      feeAssignments,
+    });
+  } catch (error) {
+    console.error('Error retrieving fee assignments:', {
+      event: 'get_student_fee_assignments_error',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+

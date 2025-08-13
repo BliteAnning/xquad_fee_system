@@ -1,211 +1,138 @@
 {
   "info": {
-    "name": "School OTP Process",
+    "name": "FeePaymentSystem_FeeAssignments",
+    "_postman_id": "3d9f5b8c-6c3e-4d2f-b7a4-2e5f7c8d9a3c",
+    "description": "Tests for Fee Assignments endpoints in the Fee Payment System",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
-      "name": "Send OTP",
+      "name": "Get Admin Fee Assignments",
       "request": {
-        "method": "POST",
+        "method": "GET",
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer {{tempToken}}",
-            "description": "Temporary JWT token received after login attempt"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+            "value": "Bearer {{schoolToken}}",
+            "type": "text"
           }
         ],
-        "body": {
-          "mode": "raw",
-          "raw": "{}"
-        },
         "url": {
-          "raw": "{{baseUrl}}/api/v1/school/mfa/send-otp",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "v1", "school", "mfa", "send-otp"]
-        },
-        "description": "Sends an OTP to the school's registered email address. Requires a temporary JWT token obtained after login attempt when MFA is required."
-      },
-      "response": [
-        {
-          "name": "Success",
-          "status": "OK",
-          "code": 200,
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "body": "{\"success\": true, \"message\": \"OTP sent to your email\"}"
-        },
-        {
-          "name": "Unauthorized",
-          "status": "Unauthorized",
-          "code": 401,
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "body": "{\"success\": false, \"message\": \"Unauthorized\"}"
+          "raw": "{{BASE_URL}}/school/fee-assignments?feeType=Tuition&status=overdue&page=1&limit=10&sortBy=dueDate&order=asc",
+          "host": ["{{BASE_URL}}"],
+          "path": ["school", "fee-assignments"],
+          "query": [
+            { "key": "feeType", "value": "Tuition" },
+            { "key": "status", "value": "overdue" },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "10" },
+            { "key": "sortBy", "value": "dueDate" },
+            { "key": "order", "value": "asc" }
+          ]
         }
-      ]
+      },
+      "response": []
     },
     {
-      "name": "Resend OTP",
+      "name": "Get Admin Fee Assignments (Group Criteria)",
       "request": {
-        "method": "POST",
+        "method": "GET",
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer {{tempToken}}",
-            "description": "Temporary JWT token received after login attempt"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+            "value": "Bearer {{schoolToken}}",
+            "type": "text"
           }
         ],
-        "body": {
-          "mode": "raw",
-          "raw": "{}"
-        },
         "url": {
-          "raw": "{{baseUrl}}/api/v1/school/mfa/resend-otp",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "v1", "school", "mfa", "resend-otp"]
-        },
-        "description": "Resends an OTP to the school's registered email address. Requires a temporary JWT token."
-      },
-      "response": [
-        {
-          "name": "Success",
-          "status": "OK",
-          "code": 200,
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "body": "{\"success\": true, \"message\": \"OTP resent to your email\"}"
-        },
-        {
-          "name": "Unauthorized",
-          "status": "Unauthorized",
-          "code": 401,
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "body": "{\"success\": false, \"message\": \"Unauthorized\"}"
+          "raw": "{{BASE_URL}}/school/fee-assignments?department=Computer Science&yearOfStudy=Freshman",
+          "host": ["{{BASE_URL}}"],
+          "path": ["school", "fee-assignments"],
+          "query": [
+            { "key": "department", "value": "Computer Science" },
+            { "key": "yearOfStudy", "value": "Freshman" }
+          ]
         }
-      ]
+      },
+      "response": []
     },
     {
-      "name": "Verify OTP",
+      "name": "Get Student Fee Assignments",
       "request": {
-        "method": "POST",
+        "method": "GET",
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer {{tempToken}}",
-            "description": "Temporary JWT token received after login attempt"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+            "value": "Bearer {{studentToken}}",
+            "type": "text"
           }
         ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\"otp\": \"123456\"}"
-        },
         "url": {
-          "raw": "{{baseUrl}}/api/v1/school/mfa/verify-otp",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "v1", "school", "mfa", "verify-otp"]
-        },
-        "description": "Verifies the OTP sent to the school's email. Returns a permanent JWT token and refresh token upon successful verification."
-      },
-      "response": [
-        {
-          "name": "Success",
-          "status": "OK",
-          "code": 200,
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "body": "{\"success\": true, \"token\": \"{{jwtToken}}\", \"refreshToken\": \"{{refreshToken}}\", \"message\": \"OTP verified successfully\"}"
-        },
-        {
-          "name": "Invalid OTP",
-          "status": "Unauthorized",
-          "code": 401,
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "body": "{\"success\": false, \"message\": \"Invalid OTP\"}"
-        },
-        {
-          "name": "OTP Expired",
-          "status": "Unauthorized",
-          "code": 401,
-          "header": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            }
-          ],
-          "body": "{\"success\": false, \"message\": \"OTP expired or invalid\"}"
+          "raw": "{{BASE_URL}}/students/fee-assignments?feeType=Tuition&status=assigned",
+          "host": ["{{BASE_URL}}"],
+          "path": ["students", "fee-assignments"],
+          "query": [
+            { "key": "feeType", "value": "Tuition" },
+            { "key": "status", "value": "assigned" }
+          ]
         }
-      ]
+      },
+      "response": []
+    },
+    {
+      "name": "Get Admin Fee Assignments (Invalid Token)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer invalid_token",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/school/fee-assignments",
+          "host": ["{{BASE_URL}}"],
+          "path": ["school", "fee-assignments"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Student Fee Assignments (Missing Parameters)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{studentToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/students/fee-assignments?feeType=",
+          "host": ["{{BASE_URL}}"],
+          "path": ["students", "fee-assignments"],
+          "query": [
+            { "key": "feeType", "value": "" }
+          ]
+        }
+      },
+      "response": []
     }
   ],
   "variable": [
     {
-      "key": "baseUrl",
-      "value": "http://localhost:3000",
-      "description": "Base URL of the API"
+      "key": "BASE_URL",
+      "value": "http://localhost:3000/api/v1"
     },
     {
-      "key": "tempToken",
-      "value": "",
-      "description": "Temporary JWT token received after login attempt"
+      "key": "schoolToken",
+      "value": "YOUR_SCHOOL_TOKEN_HERE"
     },
     {
-      "key": "jwtToken",
-      "value": "",
-      "description": "Permanent JWT token received after OTP verification"
-    },
-    {
-      "key": "refreshToken",
-      "value": "",
-      "description": "Refresh token received after OTP verification"
+      "key": "studentToken",
+      "value": "YOUR_STUDENT_TOKEN_HERE"
     }
-  ],
-  "auth": {
-    "type": "bearer",
-    "bearer": [
-      {
-        "key": "token",
-        "value": "{{tempToken}}",
-        "type": "string"  
-      }
-    ]
-  }
+  ]
 }
