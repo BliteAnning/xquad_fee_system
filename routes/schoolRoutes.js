@@ -6,6 +6,7 @@ import { register, login, addStudent, getAdminDashboard, checkAuth, sendOtp, res
   sendFeeAssignmentReminders, } from '../controller/schoolController.js';
 import arcjetMiddleware from '../middleware/arcjet.js';
 import { authenticateSchool } from '../middleware/auth.js';
+import { getAllRefunds, getRefundById, getStudentRefunds } from '../controller/refundController.js';
 
 const schoolRouter = express.Router();
 
@@ -27,5 +28,9 @@ schoolRouter.delete("/audits", arcjetMiddleware, authenticateSchool, clearAllAud
 schoolRouter.get('/students', authenticateSchool, getStudents);
 schoolRouter.get('/fee-assignments', arcjetMiddleware, authenticateSchool, getFeeAssignments);
 schoolRouter.post('/fee-assignments/reminders', arcjetMiddleware, authenticateSchool, sendFeeAssignmentReminders);
+schoolRouter.get('/get-refunds', arcjetMiddleware, authenticateSchool, getAllRefunds); 
+schoolRouter.get('/get-refunds', arcjetMiddleware, authenticateSchool, getStudentRefunds);
+schoolRouter.get('/get-a-refund/:id',authenticateSchool, getRefundById)
+// Endpoint to get student refunds
 
 export default schoolRouter;

@@ -815,3 +815,49 @@ export const checkAuth = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
+
+export const getStudentPayments = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const schoolId = req.user.schoolId;
+    const { status, feeType } = req.query;
+
+    const query = { studentId, schoolId };
+    if (status) query.status = status;
+    if (feeType) query['feeId.feeType'] = { $regex: feeType, $options: 'i' };
+
+    const payments = await Payment.find(query)
+      .populate({ path: 'feeId', select: 'feeType academicSession dueDate' })
+      .select('_id amount feeId paymentProvider status receiptUrl createdAt')
+      .lean();
+    if (payments.length === 0) {
+      return res.status(404).json({ message: 'No payments found for this student' });
+    }
+    res.status(200).json({
+      payments: payments.map((payment) => ({
+        _id: payment._id,
+        amount: payment.amount,
+        feeId: payment.feeId._id,
+        feeDetails: {
+          feeType: payment.feeId.feeType,
+          academicSession: payment.feeId.academicSession,
+          dueDate: payment.feeId.dueDate,
+        },
+        paymentProvider: payment.paymentProvider,
+        status: payment.status,
+        receiptUrl: payment.receiptUrl,
+        createdAt: payment.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.error('Error retrieving student payments:', {
+      event: 'get_student_payments_error',
+      studentId: req.user?.id,
+      email: req.user?.email,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+

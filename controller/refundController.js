@@ -406,3 +406,40 @@ const calculateFraudScore = async ({ paymentId, amount, studentId }) => {
   // Example: const response = await axios.post('https://fraud-service.com/api/score', { paymentId, amount, studentId });
   return 0; // Placeholder: return actual fraud score
 };
+
+export const getAllRefunds = async (req, res) => {
+  try {
+    // Optionally, filter by studentId if needed: { studentId: req.user.id }
+    const refunds = await RefundModel.find().populate('paymentId studentId schoolId');
+    res.status(200).json({ success: true, refunds });
+  } catch (error) {
+    console.error('Error fetching refunds:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+export const getStudentRefunds = async (req, res) => {
+  try {
+    const studentId = req.user.id; // From authenticateStudent middleware
+    const refunds = await RefundModel.find({ studentId }).populate('paymentId schoolId');
+    res.status(200).json({ success: true, refunds });
+  } catch (error) {
+    console.error('Error fetching student refunds:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+export const getRefundById = async (req, res) => {
+  try {
+    const { refundId } = req.params;
+    const refund = await RefundModel.findById(refundId)
+      .populate('paymentId studentId schoolId');
+    if (!refund) {
+      return res.status(404).json({ success: false, message: 'Refund not found' });
+    }
+    res.status(200).json({ success: true, refund });
+  } catch (error) {
+    console.error('Error fetching refund:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
