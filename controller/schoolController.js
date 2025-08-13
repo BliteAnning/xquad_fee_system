@@ -33,6 +33,8 @@ import FeeAssignmentModel from "../models/feeAssignmentModel.js";
 import autoTable from "jspdf-autotable";
 import TransactionLogModel from "../models/TransactionLog.js";
 import StudentModel from "../models/Student.js";
+import AuditLogModel from "../models/AuditTrail.js";
+import ReceiptModel from "../models/Receipt.js";
 
 export const register = async (req, res) => {
   let session = null;
@@ -540,6 +542,30 @@ export const verifyOtp = async (req, res) => {
       success: false,
       message: error.message || "Failed to verify OTP",
     });
+  }
+};
+
+export const sendMfaFailed = async (req, res) => {
+  try {
+    const { email, ip, timestamp } = req.body;
+    const school = await School.findOne({ email });
+    if (!school) {
+      throw new Error("School not found");
+    }
+    await sendMfaFailedEmail(school, ip, new Date(timestamp));
+    await TransactionLog.create({
+      schoolId: school._id,
+      action: "mfa_failed_email_sent",
+      details: { email: school.email, ip, timestamp },
+    });
+    res.status(200).json({ success: true, message: "MFA failure notification sent" });
+  } catch (error) {
+    console.error("Send MFA failed email error:", {
+      event: "send_mfa_failed_error",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ success: false, message: "Failed to send MFA failure notification" });
   }
 };
 
@@ -1575,6 +1601,86 @@ export const getStudents = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
+
+export const getStudentById = async (req, res) => {
+  try {
+    const schoolId = req.user.id;
+    const studentId = req.params.id;
+
+    // Fetch student and verify school association
+    const student = await Student.findOne({ _id: studentId, schoolId }).lean();
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found or not associated with this school' });
+    }
+
+    // Fetch related data
+    const feeAssignments = await FeeAssignmentModel.find({ studentId, schoolId })
+      .populate({
+        path: 'feeId',
+        select: 'feeType amount dueDate academicSession',
+      })
+      .lean();
+
+    const payments = await Payment.find({ studentId, schoolId })
+      .select('amount paymentProvider status createdAt')
+      .lean();
+
+    const receipts = await ReceiptModel.find({ studentId, schoolId })
+      .select('paymentId receiptUrl createdAt')
+      .lean();
+
+    const auditLogs = await AuditLogModel.find({
+      entityType: 'Student',
+      entityId: studentId,
+      $or: [
+        { actorType: 'admin', actor: schoolId },
+        { actorType: 'student', actor: studentId },
+        { actorType: 'system', actor: null },
+      ],
+    })
+      .populate('actor', 'name email')
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    // Calculate payment stats
+    const paymentStats = {
+      fully_paid: feeAssignments.filter((fa) => fa.status === 'fully_paid').length,
+      partially_paid: feeAssignments.filter((fa) => fa.status === 'partially_paid').length,
+      overdue: feeAssignments.filter((fa) => fa.status === 'overdue').length,
+    };
+
+    await logActionUtil({
+      entityType: 'Student',
+      entityId: studentId,
+      action: 'student_details_viewed',
+      actor: schoolId,
+      actorType: 'admin',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        studentId,
+      },
+    });
+
+    res.status(200).json({
+      student,
+      feeAssignments,
+      payments,
+      receipts,
+      auditLogs,
+      paymentStats,
+    });
+  } catch (error) {
+    console.error('Error retrieving student details:', {
+      event: 'get_student_details_error',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
 
 export const getFeeAssignments = async (req, res) => {
   try {

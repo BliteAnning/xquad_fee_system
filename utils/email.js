@@ -2,7 +2,7 @@ import nodemailer from "nodemailer";
 import { EMAIL_PASSWORD, SYSTEM_NAME } from "../config/env.js";
 import School from "../models/School.js";
 
-export const FROM_EMAIL = /*"kojoameyaw519@gmail.com"*/ process.env.EMAIL_HOST ;
+export const FROM_EMAIL = /*"kojoameyaw519@gmail.com"*/ process.env.EMAIL_HOST;
 
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -203,4 +203,48 @@ export const sendFeeAssignmentEmail = async (student, fee, dueDate) => {
   };
 
   await transporter.sendMail(mailOptions);
+};
+
+export const sendReceipt = async (
+  student,
+  school,
+  receipt,
+  fee,
+  amount,
+  paymentDate
+) => {
+  const mailOptions = {
+    from: `"${school.name} Payment System" <${FROM_EMAIL}>`,
+    to: [student.email, school.email].join(","), // Send to both student and school
+    subject: `Payment Receipt: ${receipt.receiptNumber}`,
+    html: `
+      <h1 style="color: ${COLORS.primary}">Payment Receipt</h1>
+      <p>Dear ${student.name},</p>
+      <p>A payment has been initiated at ${school.name}.</p>
+      <p><strong>Receipt Number:</strong> ${receipt.receiptNumber}</p>
+      <p><strong>Student Name:</strong> ${student.name}</p>
+      <p><strong>Student ID:</strong> ${student.studentId}</p>
+      <p><strong>Student Email:</strong> ${student.email}</p>
+      <p><strong>School Name:</strong> ${school.name}</p>
+      <p><strong>Fee Type:</strong> ${fee.feeType}</p>
+      <p><strong>Academic Session:</strong> ${fee.academicSession}</p>
+      <p><strong>Payment Amount:</strong> NGN ${amount.toFixed(2)}</p>
+      <p><strong>Payment Date:</strong> ${
+        paymentDate.toISOString().split("T")[0]
+      }</p>
+      <p>Download your receipt: <a href="${receipt.pdfUrl}" style="color: ${
+      COLORS.primary
+    }">View Receipt</a></p>
+      <p>Access your dashboard for more details: <a href="http://localhost:3000/dashboard" style="color: ${
+        COLORS.primary
+      }">Dashboard</a></p>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error("Error sending receipt email:", error);
+    throw new Error(`Error sending receipt email: ${error.message}`);
+  }
 };
