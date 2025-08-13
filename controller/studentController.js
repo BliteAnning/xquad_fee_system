@@ -21,6 +21,7 @@ import {
   MAX_LOGIN_ATTEMPTS,
 } from "../config/env.js";
 import FeeAssignmentModel from "../models/feeAssignmentModel.js";
+import { logActionUtil } from "./auditController.js";
 
 export const login = async (req, res) => {
   let session = null;
@@ -592,3 +593,225 @@ export const getStudentFeeAssignments = async (req, res) => {
   }
 };
 
+export const checkAuth = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const student = await Student.findById(studentId).lean();
+    if (!student) {
+      await logActionUtil({
+        entityType: 'Student',
+        entityId: studentId,
+        action: 'check_auth_failure',
+        actor: studentId,
+        actorType: 'student',
+        metadata: {
+          ip: req.ip,
+          deviceInfo: req.headers['user-agent'],
+          reason: 'Student not found',
+        },
+      });
+      await TransactionLog.create({
+        action: 'check_auth_failure',
+        schoolId: req.user.schoolId,
+        metadata: {
+          ip: req.ip,
+          deviceInfo: req.headers['user-agent'],
+          reason: 'Student not found',
+        },
+      });
+      return res.status(401).json({ message: 'Student not found' });
+    }
+
+    const refreshTokenDoc = await StudentRefreshToken.findOne({ studentId });
+    if (!refreshTokenDoc) {
+     try {
+       await logActionUtil({
+         entityType: 'Student',
+         entityId: studentId,
+         action: 'check_auth_failure',
+         actor: studentId,
+         actorType: 'student',
+         metadata: {
+           ip: req.ip,
+           deviceInfo: req.headers['user-agent'],
+           reason: 'No refresh token found',
+         }
+        });
+     } catch (error) {
+      console.log(`LogActionUtil Error:`,error)
+     }
+      try {
+        await TransactionLog.create({
+          action: 'check_auth_failure',
+          schoolId: req.user.schoolId,
+          metadata: {
+            ip: req.ip,
+            deviceInfo: req.headers['user-agent'],
+            reason: 'No refresh token found',
+          },
+        });
+        return res.status(401).json({ message: 'Invalid refresh token' });
+      } catch (error) {
+        console.log(`TransactionLog Error:`,error)
+      }
+    }
+
+    let accessToken = req.headers.authorization.split('Bearer ')[1];
+    let refreshToken = refreshTokenDoc.token;
+
+    try {
+      jwt.verify(accessToken, STUDENT_JWT_SECRET);
+    } catch (error) {
+      if (error.name === 'TokenExpiredError') {
+        try {
+          jwt.verify(refreshToken, STUDENT_JWT_REFRESH_SECRET);
+          accessToken = jwt.sign(
+            { id: student._id, schoolId: student.schoolId },
+            STUDENT_JWT_SECRET,
+            { expiresIn: JWT_EXPIRES_IN }
+          );
+          refreshToken = jwt.sign(
+            { id: student._id },
+            STUDENT_JWT_REFRESH_SECRET,
+            { expiresIn: '7d' }
+          );
+          await StudentRefreshToken.findOneAndUpdate(
+            { studentId },
+            {
+              token: refreshToken,
+              expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            },
+            { upsert: true }
+          );
+          await logActionUtil({
+            entityType: 'Student',
+            entityId: studentId,
+            action: 'token_refreshed',
+            actor: studentId,
+            actorType: 'student',
+            metadata: {
+              ip: req.ip,
+              deviceInfo: req.headers['user-agent'],
+            },
+          });
+          await TransactionLog.create({
+            action: 'token_refreshed',
+            schoolId: student.schoolId,
+            metadata: {
+              ip: req.ip,
+              deviceInfo: req.headers['user-agent'],
+            },
+          });
+        } catch (refreshError) {
+          await logActionUtil({
+            entityType: 'Student',
+            entityId: studentId,
+            action: 'check_auth_failure',
+            actor: studentId,
+            actorType: 'student',
+            metadata: {
+              ip: req.ip,
+              deviceInfo: req.headers['user-agent'],
+              reason: 'Invalid refresh token',
+            },
+          });
+          await TransactionLog.create({
+            action: 'check_auth_failure',
+            schoolId: student.schoolId,
+            metadata: {
+              ip: req.ip,
+              deviceInfo: req.headers['user-agent'],
+              reason: 'Invalid refresh token',
+            },
+          });
+          return res.status(401).json({ message: 'Invalid refresh token' });
+        }
+      } else {
+        await logActionUtil({
+          entityType: 'Student',
+          entityId: studentId,
+          action: 'check_auth_failure',
+          actor: studentId,
+          actorType: 'student',
+          metadata: {
+            ip: req.ip,
+            deviceInfo: req.headers['user-agent'],
+            reason: error.message,
+          },
+        });
+        await TransactionLog.create({
+          action: 'check_auth_failure',
+          schoolId: student.schoolId,
+          metadata: {
+            ip: req.ip,
+            deviceInfo: req.headers['user-agent'],
+            reason: error.message,
+          },
+        });
+        return res.status(401).json({ message: 'Invalid token' });
+      }
+    }
+
+    await logActionUtil({
+      entityType: 'Student',
+      entityId: studentId,
+      action: 'check_auth_success',
+      actor: studentId,
+      actorType: 'student',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+      },
+    });
+    await TransactionLog.create({
+      action: 'check_auth_success',
+      schoolId: student.schoolId,
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+      },
+    });
+
+    res.status(200).json({
+      user: {
+        _id: student._id,
+        name: student.name,
+        email: student.email,
+        studentId: student.studentId,
+        department: student.department,
+        yearOfStudy: student.yearOfStudy,
+        courses: student.courses,
+      },
+      accessToken,
+      refreshToken,
+    });
+  } catch (error) {
+    console.error('Error checking auth:', {
+      event: 'check_auth_error',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    await logActionUtil({
+      entityType: 'Student',
+      entityId: req.user?.id || 'unknown',
+      action: 'check_auth_failure',
+      actor: req.user?.id || null,
+      actorType: 'student',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        reason: error.message,
+      },
+    });
+    await TransactionLog.create({
+      action: 'check_auth_failure',
+      schoolId: req.user?.schoolId || null,
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        reason: error.message,
+      },
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
