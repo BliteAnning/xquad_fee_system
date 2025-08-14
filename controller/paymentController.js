@@ -12,7 +12,7 @@ import ReceiptModel from '../models/Receipt.js';
 import StudentModel from '../models/Student.js'; 
 import { v2 as cloudinary } from 'cloudinary'; 
 import {jsPDF} from 'jspdf'; 
-import { sendFraudAlertEmail, sendReceipt } from '../utils/email.js';
+import { sendFeeAssignmentEmail, sendFraudAlertEmail, sendReceipt } from '../utils/email.js';
 import mongoose from 'mongoose'; 
 import COLORS from "../config/colors.js";
 import autoTable from "jspdf-autotable";
@@ -240,7 +240,7 @@ export const initializePayment = async (req, res) => {
       `,
     };
 
-    await sendFeeAssignmentEmail(student, fee, fee.dueDate, mailOptions); // CHANGE: Reuse sendFeeAssignmentEmail with custom mailOptions
+    await sendFeeAssignmentEmail(student, fee, fee.dueDate, mailOptions); 
 
     // CHANGE: Log receipt generation and email sending
     try {
