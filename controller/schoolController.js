@@ -1848,3 +1848,16 @@ export const sendFeeAssignmentReminders = async (req, res) => {
   }
 };
 
+export const getAllPayments = async (req, res) => {
+  try {
+    const payments = await Payment.find()
+      .populate({ path: 'feeId', select: 'feeType academicSession dueDate' })
+      .populate({ path: 'studentId', select: 'name email studentId department yearOfStudy' })
+      .populate({ path: 'schoolId', select: 'name email' })
+      .select('_id amount feeId studentId schoolId paymentProvider status receiptUrl createdAt');
+    res.status(200).json({ success: true, payments });
+  } catch (error) {
+    console.error('Error fetching all payments:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
