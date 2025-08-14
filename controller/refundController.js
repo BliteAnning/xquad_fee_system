@@ -214,12 +214,12 @@ export const reviewRefund = async (req, res) => {
         req.write(params);
         req.end();
       });
-
+        console.log(`paystackResponse`,paystackResponse);
       // Update refund status to processed if Paystack accepts it
-      if (paystackResponse.status && paystackResponse.data.status === 'success') {
-        refund.status = 'processed';
+      if (paystackResponse.status === true) {
+        refund.status = 'approved';
         refund.auditTrail.push({
-          action: 'refund_processed',
+          action: 'refund_approved',
           timestamp: new Date(),
           metadata: { ip: req.ip, deviceInfo: req.headers['user-agent'], adminId, paystackRef: payment.providerMetadata.get('paystackRef') },
         });
@@ -230,7 +230,7 @@ export const reviewRefund = async (req, res) => {
           paymentId: refund.paymentId,
           refundId: refund._id,
           schoolId: refund.schoolId,
-          action: 'refund_processed',
+          action: 'refund_approved',
           metadata: {
             ip: req.ip,
             deviceInfo: req.headers['user-agent'],
@@ -244,7 +244,7 @@ export const reviewRefund = async (req, res) => {
         await logActionUtil({
           entityType: 'Refund',
           entityId: refund._id,
-          action: 'refund_processed',
+          action: 'refund_approved',
           actor: adminId,
           actorType: 'admin',
           metadata: {
@@ -255,12 +255,13 @@ export const reviewRefund = async (req, res) => {
             paystackRef: payment.providerMetadata.get('paystackRef'),
           },
         });
+        await refund.save();
       } else {
         // Roll back status to approved if Paystack fails
-        refund.status = 'approved';
-        await refund.save();
+        refund.status = 'failed';
         return res.status(400).json({ message: 'Paystack refund initiation failed', error: paystackResponse.message });
       }
+
     }
 
     res.status(200).json({ message: `Refund ${status} successfully`, refund });
@@ -431,9 +432,10 @@ export const getStudentRefunds = async (req, res) => {
 
 export const getRefundById = async (req, res) => {
   try {
-    const { refundId } = req.params;
-    const refund = await RefundModel.findById(refundId)
+    const { id } = req.params;
+    const refund = await RefundModel.findById(id)
       .populate('paymentId studentId schoolId');
+      
     if (!refund) {
       return res.status(404).json({ success: false, message: 'Refund not found' });
     }

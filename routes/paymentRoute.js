@@ -4,6 +4,8 @@ import { initializePayment, verifyPayment, handleWebhook } from '../controller/p
 import { createInvoice } from '../controller/invoiceController.js';
 import arcjetStudentMiddleware from '../middleware/arcjetStudent.js';
 import { getStudentPayments } from '../controller/studentController.js';
+import { getAllPayments } from '../controller/schoolController.js';
+
 
 const paymentRouter = express.Router();
 
@@ -12,5 +14,6 @@ paymentRouter.get('/verify', arcjetStudentMiddleware, authenticateSchool, verify
 paymentRouter.post('/webhook', arcjetStudentMiddleware,handleWebhook);
 paymentRouter.post('/invoice/generate', arcjetStudentMiddleware, authenticateSchool, createInvoice); // Endpoint to generate invoice
 paymentRouter.get('/get-payments', arcjetStudentMiddleware, authenticateStudent, getStudentPayments); // Endpoint to get student payments
+paymentRouter.get('/all-payments', authenticateSchool, getAllPayments); // Endpoint to get all payments for school
 
 export default paymentRouter;
