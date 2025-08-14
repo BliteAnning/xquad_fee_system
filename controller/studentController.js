@@ -861,3 +861,229 @@ export const getStudentPayments = async (req, res) => {
   }
 };
 
+export const getStudentNotifications = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const schoolId = req.user.schoolId;
+    const { type, status, page = 1, limit = 20, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+
+    const query = { studentId, schoolId, deletedAt: null };
+    if (type) query.type = { $regex: type, $options: 'i' };
+    if (status) query.status = status;
+
+    const sort = {};
+    sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+    const notifications = await Notification.find(query)
+      .sort(sort)
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .lean();
+
+    // Update notifications to mark as read and sent
+    await Notification.updateMany(
+      { _id: { $in: notifications.map(n => n._id) }, read: false },
+      { $set: { read: true, status: 'sent', sentAt: new Date() } }
+    );
+
+    const total = await Notification.countDocuments(query);
+    const unreadCount = await Notification.countDocuments({ studentId, schoolId, read: false, deletedAt: null });
+
+    await logActionUtil({
+      entityType: 'Notification',
+      entityId: studentId,
+      action: 'notifications_viewed',
+      actor: studentId,
+      actorType: 'student',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        filters: { type, status },
+        notificationCount: notifications.length,
+      },
+    });
+
+    await TransactionLog.create({
+      schoolId,
+      action: 'notifications_viewed',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        studentId,
+        filters: { type, status },
+      },
+    });
+
+    res.status(200).json({
+      notifications,
+      total,
+      unreadCount,
+      page: parseInt(page),
+      limit: parseInt(limit),
+    });
+  } catch (error) {
+    console.error('Error retrieving notifications:', {
+      event: 'get_student_notifications_error',
+      studentId: req.user?.id,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const markNotificationsRead = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const schoolId = req.user.schoolId;
+    const { notificationIds } = req.body; 
+
+    const query = { studentId, schoolId, deletedAt: null, read: false };
+    if (notificationIds && Array.isArray(notificationIds)) {
+      query._id = { $in: notificationIds };
+    }
+
+    const result = await Notification.updateMany(
+      query,
+      { $set: { read: true, status: 'sent', sentAt: new Date() } }
+    );
+
+    await logActionUtil({
+      entityType: 'Notification',
+      entityId: studentId,
+      action: 'notifications_marked_read',
+      actor: studentId,
+      actorType: 'student',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        notificationCount: result.modifiedCount,
+      },
+    });
+
+    await TransactionLog.create({
+      schoolId,
+      action: 'notifications_marked_read',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        studentId,
+        notificationCount: result.modifiedCount,
+      },
+    });
+
+    res.status(200).json({ message: `Marked ${result.modifiedCount} notifications as read` });
+  } catch (error) {
+    console.error('Error marking notifications as read:', {
+      event: 'mark_notifications_read_error',
+      studentId: req.user?.id,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const deleteNotification = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const schoolId = req.user.schoolId;
+    const notificationId = req.params.id;
+
+    const notification = await Notification.findOne({
+      _id: notificationId,
+      studentId,
+      schoolId,
+      deletedAt: null,
+    });
+
+    if (!notification) {
+      return res.status(404).json({ message: 'Notification not found or already deleted' });
+    }
+
+    notification.deletedAt = new Date();
+    await notification.save();
+
+    await logActionUtil({
+      entityType: 'Notification',
+      entityId: notificationId,
+      action: 'notification_deleted',
+      actor: studentId,
+      actorType: 'student',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        notificationType: notification.type,
+      },
+    });
+
+    await TransactionLog.create({
+      schoolId,
+      action: 'notification_deleted',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        studentId,
+        notificationId,
+        notificationType: notification.type,
+      },
+    });
+
+    res.status(200).json({ message: 'Notification deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting notification:', {
+      event: 'delete_notification_error',
+      studentId: req.user?.id,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const clearAllNotifications = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const schoolId = req.user.schoolId;
+
+    const result = await Notification.updateMany(
+      { studentId, schoolId, deletedAt: null },
+      { $set: { deletedAt: new Date() } }
+    );
+
+    await logActionUtil({
+      entityType: 'Notification',
+      entityId: studentId,
+      action: 'notifications_cleared',
+      actor: studentId,
+      actorType: 'student',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        notificationCount: result.modifiedCount,
+      },
+    });
+
+    await TransactionLog.create({
+      schoolId,
+      action: 'notifications_cleared',
+      metadata: {
+        ip: req.ip,
+        deviceInfo: req.headers['user-agent'],
+        studentId,
+        notificationCount: result.modifiedCount,
+      },
+    });
+
+    res.status(200).json({ message: `Cleared ${result.modifiedCount} notifications` });
+  } catch (error) {
+    console.error('Error clearing notifications:', {
+      event: 'clear_notifications_error',
+      studentId: req.user?.id,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+

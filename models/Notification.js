@@ -36,11 +36,14 @@ const notificationSchema = new mongoose.Schema(
     studentId: { type: mongoose.Schema.Types.ObjectId, ref: "Student" },
     paymentId: { type: mongoose.Schema.Types.ObjectId, ref: "Payment" },
     refundId: { type: mongoose.Schema.Types.ObjectId, ref: "Refund" },
+    read: { type: Boolean, default: false },
+    deletedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
 
 notificationSchema.index({ schoolId: 1, type: 1 });
+notificationSchema.index({ studentId: 1, deletedAt: 1 });
 
 const NotificationModel =
   mongoose.models.Notification ||

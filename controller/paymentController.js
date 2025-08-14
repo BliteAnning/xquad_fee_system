@@ -12,11 +12,11 @@ import ReceiptModel from '../models/Receipt.js';
 import StudentModel from '../models/Student.js'; 
 import { v2 as cloudinary } from 'cloudinary'; 
 import {jsPDF} from 'jspdf'; 
-
-import { sendFeeAssignmentEmail } from '../utils/email.js'; // CHANGE: Added import for email utility
-import mongoose from 'mongoose'; // CHANGE: Added import for Mongoose session
+import { sendFraudAlertEmail, sendReceipt } from '../utils/email.js';
+import mongoose from 'mongoose'; 
 import COLORS from "../config/colors.js";
 import autoTable from "jspdf-autotable";
+import { checkFraud } from '../utils/fraudDetection.js';
 
 const PAYSTACK_BASE_URL = "api.paystack.co";
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
@@ -28,7 +28,7 @@ export const initializePayment = async (req, res) => {
     session.startTransaction();
 
     const { feeId, amount } = req.body;
-    const studentId = req.user.id; // From authenticateStudent middleware
+    const studentId = req.user.id;
 
     // Validate fee
     const fee = await FeeModel.findById(feeId).session(session);

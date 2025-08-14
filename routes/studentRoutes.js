@@ -1,5 +1,5 @@
 import express from 'express';
-import { checkAuth, getDashboard, getStudentFeeAssignments, login } from '../controller/studentController.js';
+import { checkAuth, clearAllNotifications, deleteNotification, getDashboard, getStudentFeeAssignments, getStudentNotifications, login, markNotificationsRead } from '../controller/studentController.js';
 import arcjetStudentMiddleware from '../middleware/arcjetStudent.js';
 import { authenticateStudent } from '../middleware/auth.js';
 import { getStudentRefunds } from '../controller/refundController.js';
@@ -11,5 +11,9 @@ studentRouter.get('/dashboard', arcjetStudentMiddleware, authenticateStudent, ge
 studentRouter.get('/fee-assignments', arcjetStudentMiddleware, authenticateStudent, getStudentFeeAssignments);
 studentRouter.get('/check-auth', authenticateStudent, checkAuth);
 studentRouter.get('/get-refunds', authenticateStudent, getStudentRefunds);
+studentRouter.get('/notifications', arcjetStudentMiddleware, authenticateStudent, getStudentNotifications);
+studentRouter.post('/notifications/mark-read', arcjetStudentMiddleware, authenticateStudent, markNotificationsRead);
+studentRouter.delete('/notifications/:id', arcjetStudentMiddleware, authenticateStudent, deleteNotification);
+studentRouter.delete('/notifications', arcjetStudentMiddleware, authenticateStudent, clearAllNotifications);
 
 export default studentRouter;

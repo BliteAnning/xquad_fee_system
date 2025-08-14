@@ -248,3 +248,34 @@ export const sendReceipt = async (
     throw new Error(`Error sending receipt email: ${error.message}`);
   }
 };
+
+export const sendFraudAlertEmail = async (student, school, payment, fraudScore) => {
+  const mailOptions = {
+    from: `"${school.name} Payment System" <${FROM_EMAIL}>`,
+    to: school.email,
+    subject: `High-Risk Payment Detected: ${payment._id}`,
+    html: `
+      <h1 style="color: ${COLORS.primary}">High-Risk Payment Alert</h1>
+      <p>A payment has been flagged as high-risk at ${school.name}.</p>
+      <p><strong>Payment ID:</strong> ${payment._id}</p>
+      <p><strong>Student ID:</strong> ${student.studentId}</p>
+      <p><strong>Student Name:</strong> ${student.name}</p>
+      <p><strong>Amount:</strong> NGN ${payment.amount.toFixed(2)}</p>
+      <p><strong>Fraud Score:</strong> ${fraudScore.toFixed(2)}</p>
+      <p><strong>Status:</strong> Pending Review</p>
+      <p>Review this payment in the admin portal: <a href="http://localhost:3000/admin" style="color: ${COLORS.primary}">Admin Portal</a></p>
+      <p style="color: ${COLORS.textSecondary}">Please verify the transaction details to approve or reject.</p>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error('Error sending fraud alert email:', {
+      event: 'fraud_alert_email_error',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    throw new Error(`Error sending fraud alert email: ${error.message}`);
+  }
+};

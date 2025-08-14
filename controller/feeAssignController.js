@@ -9,6 +9,7 @@ import { logActionUtil } from './auditController.js';
 import { sendFeeAssignmentEmail } from '../utils/email.js';
 import AuditLogModel from '../models/AuditTrail.js';
 import PaymentModel from '../models/Payment.js';
+import { emitNotification } from '../server.js';
 
 // Create Fee (admin-only)
 export const createFee = async (req, res) => {
@@ -140,6 +141,7 @@ export const createFeeAssignment = async (req, res) => {
     }
 
     const newAssignments = [];
+    const notifications = [];
     for (const student of students) {
       const existingAssignment = await FeeAssignmentModel.findOne({
         feeId,
@@ -159,6 +161,16 @@ export const createFeeAssignment = async (req, res) => {
         amountDue: fee.amount,
         status: 'assigned',
       });
+
+      // CHANGE: Create notification with pending status
+      notifications.push({
+        recipient: student.email,
+        type: 'fee_assigned',
+        message: `Fee ${fee.feeType} of ${fee.amount} assigned to ${student.name}, due on ${moment(fee.dueDate).format('MMMM Do YYYY')}.`,
+        schoolId: adminId,
+        studentId: student._id,
+        status: 'pending',
+      });
     }
 
     if (newAssignments.length === 0) {
@@ -167,6 +179,12 @@ export const createFeeAssignment = async (req, res) => {
 
     const savedAssignments = await FeeAssignmentModel.insertMany(newAssignments, { session });
     const assignments = savedAssignments;
+
+    // CHANGE: Save notifications and emit via WebSocket
+    const savedNotifications = await NotificationModel.insertMany(notifications, { session });
+    for (const notification of savedNotifications) {
+      emitNotification(notification.studentId.toString(), notification.toObject());
+    }
 
     const transactionLogs = savedAssignments.map((assignment) => ({
       schoolId: fee.schoolId,
@@ -215,22 +233,10 @@ export const createFeeAssignment = async (req, res) => {
     for (const student of students) {
       try {
         await sendFeeAssignmentEmail(student, fee, fee.dueDate);
-        await NotificationModel.create(
-          [{
-            recipient: student.email,
-            type: 'fee_assigned',
-            message: `Fee ${fee.feeType} assigned to ${student.name}`,
-            schoolId: adminId,
-            studentId: student._id,
-            status: 'sent',
-            sentAt: new Date(),
-          }],
-          { session }
-        );
-      } catch (notificationError) {
-        console.error('Non-critical notification error:', {
-          event: 'notification_failure',
-          error: notificationError.message,
+      } catch (emailError) {
+        console.error('Non-critical email error:', {
+          event: 'email_failure',
+          error: emailError.message,
           email: student.email,
           timestamp: new Date().toISOString(),
         });
@@ -268,8 +274,7 @@ export const createFeeAssignment = async (req, res) => {
   }
 };
 
-
-
+// Get Student Fee Assignments (student-only)
 export const getStudentFeeAssignments = async (req, res) => {
   let session = null;
   try {
@@ -346,6 +351,20 @@ export const getStudentFeeAssignments = async (req, res) => {
       }
     }
 
+    // CHANGE: Create and emit dashboard_accessed notification
+    const notification = await NotificationModel.create(
+      [{
+        recipient: student.email,
+        type: 'dashboard_accessed',
+        message: `Student ${student.name} accessed fee assignments`,
+        schoolId: student.schoolId,
+        studentId: student._id,
+        status: 'pending', // Set to pending initially
+      }],
+      { session }
+    );
+    emitNotification(studentId.toString(), notification[0].toObject());
+
     try {
       await logActionUtil({
         entityType: 'FeeAssignment',
@@ -367,28 +386,6 @@ export const getStudentFeeAssignments = async (req, res) => {
       console.error('Non-critical audit log error:', {
         event: 'audit_failure',
         error: auditError.message,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    try {
-      await NotificationModel.create(
-        [{
-          recipient: student.email,
-          type: 'dashboard_accessed',
-          message: `Student ${student.name} accessed fee assignments`,
-          schoolId: student.schoolId,
-          studentId: student._id,
-          status: 'sent',
-          sentAt: new Date(),
-        }],
-        { session }
-      );
-    } catch (notificationError) {
-      console.error('Non-critical notification error:', {
-        event: 'notification_failure',
-        error: notificationError.message,
-        email: student.email,
         timestamp: new Date().toISOString(),
       });
     }
