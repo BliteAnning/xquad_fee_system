@@ -11,9 +11,9 @@ studentRouter.get('/dashboard', arcjetStudentMiddleware, authenticateStudent, ge
 studentRouter.get('/fee-assignments', arcjetStudentMiddleware, authenticateStudent, getStudentFeeAssignments);
 studentRouter.get('/check-auth', authenticateStudent, checkAuth);
 studentRouter.get('/get-refunds', authenticateStudent, getStudentRefunds);
-studentRouter.get('/notifications', arcjetStudentMiddleware, authenticateStudent, getStudentNotifications);
-studentRouter.post('/notifications/mark-read', arcjetStudentMiddleware, authenticateStudent, markNotificationsRead);
-studentRouter.delete('/notifications/:id', arcjetStudentMiddleware, authenticateStudent, deleteNotification);
-studentRouter.delete('/notifications', arcjetStudentMiddleware, authenticateStudent, clearAllNotifications);
+studentRouter.get('/notifications', authenticateStudent, getStudentNotifications);
+studentRouter.post('/notifications/mark-read', authenticateStudent, markNotificationsRead);
+studentRouter.delete('/notifications/:id', authenticateStudent, deleteNotification);
+studentRouter.delete('/notifications', authenticateStudent, clearAllNotifications);
 
 export default studentRouter;
